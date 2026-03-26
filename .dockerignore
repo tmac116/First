@@ -1,0 +1,10 @@
+meeting_notes.py
+requirements.txt
+*.md
+.git
+__pycache__
+*.pyc
+*.pyc
+*.pyo
+.env
+meeting_notes_*.md

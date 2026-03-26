@@ -1,0 +1,29 @@
+# Fly.io deployment configuration
+# Replace "meeting-notes-YOUR-NAME" with your chosen app name (must be globally unique)
+app = "meeting-notes-YOUR-NAME"
+primary_region = "iad"
+
+[build]
+  # To use a larger/more accurate model, override the build arg:
+  # [build.args]
+  #   WHISPER_MODEL = "small"
+
+[http_service]
+  internal_port = 8080
+  force_https = true          # Required: mic access only works over HTTPS on iPhone
+  auto_stop_machines = true   # Save costs when idle
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 5            # Whisper is CPU-heavy; keep concurrency low
+
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[env]
+  WHISPER_MODEL = "base"
+  # Never put ANTHROPIC_API_KEY here — use: fly secrets set ANTHROPIC_API_KEY=sk-ant-...

@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Meeting Notes</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    /* Pulse ring animation while recording */
+    @keyframes pulse-ring {
+      0%   { transform: scale(0.9); opacity: 0.8; }
+      70%  { transform: scale(1.5); opacity: 0; }
+      100% { transform: scale(1.5); opacity: 0; }
+    }
+    .pulse-ring { animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite; }
+
+    /* Blinking cursor while notes are streaming */
+    @keyframes blink { 0%,50%{opacity:1} 51%,100%{opacity:0} }
+    .streaming::after { content:'▌'; animation: blink 1s infinite; color:#3B82F6; }
+
+    /* Rendered Markdown styles */
+    .prose h1  { font-size:1.25rem; font-weight:700; margin:1rem 0 .4rem; }
+    .prose h2  { font-size:1rem; font-weight:600; margin:1.1rem 0 .4rem;
+                 color:#374151; border-bottom:1px solid #E5E7EB; padding-bottom:.3rem; }
+    .prose h3  { font-size:.95rem; font-weight:600; margin:.9rem 0 .25rem; }
+    .prose ul,
+    .prose ol  { padding-left:1.3rem; margin:.4rem 0; }
+    .prose ul  { list-style-type:disc; }
+    .prose ol  { list-style-type:decimal; }
+    .prose li  { margin:.2rem 0; line-height:1.6; }
+    .prose p   { margin:.4rem 0; line-height:1.6; }
+    .prose strong { font-weight:600; }
+    .prose em  { font-style:italic; }
+    .prose hr  { border:none; border-top:1px solid #E5E7EB; margin:1rem 0; }
+    .prose code { background:#F3F4F6; padding:.1rem .3rem; border-radius:.2rem; font-size:.85rem; }
+
+    /* iPhone safe area */
+    body { padding-bottom: env(safe-area-inset-bottom); }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3 sticky top-0 z-10 shadow-sm">
+    <div class="w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center flex-shrink-0">
+      <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2
+             M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+      </svg>
+    </div>
+    <h1 class="text-lg font-semibold text-gray-900">Meeting Notes</h1>
+  </header>
+
+  <main class="max-w-xl mx-auto px-4 py-6 flex flex-col gap-5">
+
+    <!-- Record card -->
+    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-6">
+      <p id="status-text" class="text-center text-sm text-gray-500 mb-6">
+        Tap the button to start recording your meeting.
+      </p>
+
+      <div class="flex flex-col items-center gap-3">
+        <!-- Animated ring + button -->
+        <div class="relative flex items-center justify-center w-24 h-24">
+          <div id="pulse-ring"
+               class="hidden absolute inset-0 rounded-full bg-red-400 opacity-60 pulse-ring"></div>
+          <button id="record-btn"
+                  class="relative z-10 w-20 h-20 rounded-full shadow-lg
+                         flex items-center justify-center
+                         bg-blue-500 hover:bg-blue-600 active:scale-95
+                         transition-all duration-150 focus:outline-none"
+                  onclick="handleTap()">
+            <!-- Mic icon -->
+            <svg id="icon-mic" class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4
+                   m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/>
+            </svg>
+            <!-- Stop icon (hidden by default) -->
+            <svg id="icon-stop" class="hidden w-8 h-8 text-white" fill="currentColor" viewBox="0 0 24 24">
+              <rect x="6" y="6" width="12" height="12" rx="2"/>
+            </svg>
+          </button>
+        </div>
+
+        <!-- Timer -->
+        <div id="timer" class="hidden text-2xl font-mono font-bold text-red-500 tabular-nums">
+          00:00
+        </div>
+
+        <p id="btn-label" class="text-sm font-medium text-gray-400">Tap to record</p>
+      </div>
+    </div>
+
+    <!-- Transcript (collapsible) -->
+    <details id="transcript-section" class="hidden bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <summary class="px-4 py-3 text-sm font-medium text-gray-500 cursor-pointer select-none hover:bg-gray-50">
+        View raw transcript
+      </summary>
+      <p id="transcript-text" class="px-4 pb-4 pt-3 text-sm text-gray-600 leading-relaxed border-t border-gray-100"></p>
+    </details>
+
+    <!-- Notes output -->
+    <div id="notes-section" class="hidden bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+      <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-gray-700">Meeting Notes</h2>
+        <div class="flex gap-1">
+          <button id="copy-btn" onclick="copyNotes()"
+                  class="text-xs text-blue-500 font-medium px-3 py-1.5 rounded-lg
+                         hover:bg-blue-50 transition-colors">Copy</button>
+          <button onclick="downloadNotes()"
+                  class="text-xs text-gray-500 font-medium px-3 py-1.5 rounded-lg
+                         hover:bg-gray-50 transition-colors">Save .md</button>
+        </div>
+      </div>
+      <div id="notes-content" class="prose px-4 py-4 text-sm text-gray-800"></div>
+    </div>
+
+  </main>
+
+  <script>
+  // ── State ────────────────────────────────────────────────────────────────
+  let state = 'idle'; // idle | recording | processing | done | error
+  let recorder = null;
+  let audioChunks = [];
+  let timerRef = null;
+  let notesMarkdown = '';
+  let transcriptText = '';
+
+  // ── DOM shortcuts ────────────────────────────────────────────────────────
+  const $ = id => document.getElementById(id);
+
+  function setStatus(msg, colorClass = 'text-gray-500') {
+    const el = $('status-text');
+    el.className = `text-center text-sm ${colorClass} mb-6`;
+    el.textContent = msg;
+  }
+
+  function setRecordingUI(on) {
+    const btn = $('record-btn');
+    if (on) {
+      btn.classList.replace('bg-blue-500','bg-red-500');
+      btn.classList.replace('hover:bg-blue-600','hover:bg-red-600');
+      $('icon-mic').classList.add('hidden');
+      $('icon-stop').classList.remove('hidden');
+      $('pulse-ring').classList.remove('hidden');
+      $('btn-label').textContent = 'Tap to stop';
+    } else {
+      btn.classList.replace('bg-red-500','bg-blue-500');
+      btn.classList.replace('hover:bg-red-600','hover:bg-blue-600');
+      $('icon-mic').classList.remove('hidden');
+      $('icon-stop').classList.add('hidden');
+      $('pulse-ring').classList.add('hidden');
+      $('btn-label').textContent = 'Tap to record';
+    }
+  }
+
+  function startTimer() {
+    const el = $('timer');
+    el.classList.remove('hidden');
+    const t0 = Date.now();
+    timerRef = setInterval(() => {
+      const s = Math.floor((Date.now() - t0) / 1000);
+      el.textContent = `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+    }, 500);
+  }
+
+  function stopTimer() {
+    clearInterval(timerRef);
+    $('timer').classList.add('hidden');
+  }
+
+  function disableBtn() {
+    $('record-btn').disabled = true;
+    $('record-btn').classList.add('opacity-40', 'cursor-not-allowed');
+  }
+
+  function enableBtn(label = 'Record again') {
+    $('record-btn').disabled = false;
+    $('record-btn').classList.remove('opacity-40', 'cursor-not-allowed');
+    $('btn-label').textContent = label;
+  }
+
+  function renderNotes(md, streaming = false) {
+    const el = $('notes-content');
+    el.innerHTML = marked.parse(md);
+    streaming ? el.classList.add('streaming') : el.classList.remove('streaming');
+    $('notes-section').classList.remove('hidden');
+    // Auto-scroll on mobile so new content is visible
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  // ── Audio format detection ───────────────────────────────────────────────
+  function bestMimeType() {
+    const candidates = [
+      'audio/mp4',               // iOS Safari / Chrome on iOS
+      'audio/webm;codecs=opus',  // Android Chrome, desktop Chrome/Firefox
+      'audio/webm',
+      'audio/ogg;codecs=opus',
+    ];
+    return candidates.find(t => {
+      try { return MediaRecorder.isTypeSupported(t); } catch { return false; }
+    }) ?? '';
+  }
+
+  // ── Recording ────────────────────────────────────────────────────────────
+  async function startRecording() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount:1, echoCancellation:true, noiseSuppression:true, autoGainControl:true }
+      });
+      const mimeType = bestMimeType();
+      recorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+      audioChunks = [];
+
+      recorder.ondataavailable = e => { if (e.data?.size > 0) audioChunks.push(e.data); };
+
+      // iOS may fire oninactive if interrupted (e.g., phone call)
+      recorder.addEventListener('inactive', () => {
+        if (state === 'recording') handleTap();
+      });
+
+      recorder.start();
+      state = 'recording';
+      setRecordingUI(true);
+      startTimer();
+      setStatus('Recording… tap the button to stop.', 'text-red-500');
+    } catch (err) {
+      const msg = err.name === 'NotAllowedError'
+        ? 'Microphone access denied. Allow mic access in browser settings and try again.'
+        : `Could not start recording: ${err.message}`;
+      setStatus(msg, 'text-red-600');
+      state = 'error';
+    }
+  }
+
+  function stopAndProcess() {
+    stopTimer();
+    setRecordingUI(false);
+    disableBtn();
+    state = 'processing';
+    setStatus('Uploading and transcribing…', 'text-blue-500');
+
+    recorder.onstop = async () => {
+      recorder.stream.getTracks().forEach(t => t.stop());
+      const blob = new Blob(audioChunks, { type: recorder.mimeType });
+      await uploadAudio(blob);
+    };
+    recorder.stop();
+  }
+
+  function handleTap() {
+    if (state === 'idle' || state === 'done' || state === 'error') {
+      // Reset for a new recording
+      notesMarkdown = '';
+      transcriptText = '';
+      $('notes-section').classList.add('hidden');
+      $('transcript-section').classList.add('hidden');
+      startRecording();
+    } else if (state === 'recording') {
+      stopAndProcess();
+    }
+    // Ignore taps while processing
+  }
+
+  // ── Upload + SSE stream ──────────────────────────────────────────────────
+  async function uploadAudio(blob) {
+    const ext = blob.type.includes('mp4') ? 'm4a'
+              : blob.type.includes('ogg') ? 'ogg' : 'webm';
+    const form = new FormData();
+    form.append('audio', blob, `recording.${ext}`);
+
+    let resp;
+    try {
+      resp = await fetch('/api/process', { method:'POST', body:form });
+    } catch (err) {
+      setStatus(`Network error: ${err.message}`, 'text-red-600');
+      state = 'error'; enableBtn(); return;
+    }
+    if (!resp.ok) {
+      setStatus(`Server error (${resp.status})`, 'text-red-600');
+      state = 'error'; enableBtn(); return;
+    }
+
+    // Read SSE stream via fetch ReadableStream (EventSource only supports GET)
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        // SSE frames are separated by a blank line (\n\n)
+        const frames = buf.split('\n\n');
+        buf = frames.pop(); // keep any partial trailing frame
+        for (const frame of frames) {
+          const line = frame.split('\n').find(l => l.startsWith('data: '));
+          if (!line) continue;
+          try { handleEvent(JSON.parse(line.slice(6))); } catch {}
+        }
+      }
+    } catch (err) {
+      setStatus(`Stream error: ${err.message}`, 'text-red-600');
+      state = 'error'; enableBtn();
+    }
+  }
+
+  function handleEvent(evt) {
+    switch (evt.type) {
+      case 'status':
+        setStatus(evt.message, 'text-blue-500');
+        break;
+      case 'transcript':
+        transcriptText = evt.text;
+        $('transcript-text').textContent = evt.text;
+        $('transcript-section').classList.remove('hidden');
+        break;
+      case 'chunk':
+        notesMarkdown += evt.text;
+        renderNotes(notesMarkdown, true);
+        break;
+      case 'done':
+        renderNotes(notesMarkdown, false);
+        setStatus('Notes ready!', 'text-green-600');
+        state = 'done'; enableBtn();
+        break;
+      case 'error':
+        setStatus(evt.message, 'text-red-600');
+        state = 'error'; enableBtn();
+        break;
+    }
+  }
+
+  // ── Export ───────────────────────────────────────────────────────────────
+  function copyNotes() {
+    const text = notesMarkdown;
+    (navigator.clipboard?.writeText(text) ?? Promise.reject())
+      .catch(() => {
+        // Fallback for older iOS
+        const ta = Object.assign(document.createElement('textarea'),
+                                 { value:text, style:'position:fixed;opacity:0' });
+        document.body.appendChild(ta); ta.focus(); ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      })
+      .finally(() => {
+        const btn = $('copy-btn');
+        btn.textContent = 'Copied!';
+        setTimeout(() => btn.textContent = 'Copy', 2000);
+      });
+  }
+
+  function downloadNotes() {
+    const full = notesMarkdown + '\n\n---\n\n## Raw Transcript\n\n' + transcriptText;
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(new Blob([full], { type:'text/markdown' })),
+      download: `meeting-notes-${new Date().toISOString().slice(0,10)}.md`,
+    });
+    a.click();
+  }
+
+  // ── Init ─────────────────────────────────────────────────────────────────
+  marked.setOptions({ breaks: true });
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    setStatus('Audio recording is not supported in this browser.', 'text-red-600');
+    disableBtn();
+  }
+  </script>
+</body>
+</html>
